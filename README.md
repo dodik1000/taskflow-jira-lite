@@ -1,5 +1,7 @@
 # TaskFlow (Jira-lite)
 
+https://taskflow-jira-lite.vercel.app/
+
 ## Описание проекта
 
 TaskFlow — веб-приложение разработанное с использованием React, TypeScript и Supabase.
