@@ -1,6 +1,6 @@
 # TaskFlow (Jira-lite)
 
-https://taskflow-jira-lite.vercel.app/login
+https://taskflow-jira-lite.vercel.app/
 
 ## Описание проекта
 
