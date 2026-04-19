@@ -73,6 +73,7 @@ export default function BoardsPage() {
   // create board
   const handleCreate = async () => {
     try {
+      console.log('create board user:', user)
       const value = title.trim()
 
       if (!value || !user) return
