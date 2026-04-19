@@ -1,0 +1,859 @@
+import { useEffect, useState } from 'react'
+import {
+  DndContext,
+  DragOverlay,
+  PointerSensor,
+  TouchSensor,
+  useSensor,
+  useSensors,
+} from '@dnd-kit/core'
+import type { DragEndEvent, DragStartEvent } from '@dnd-kit/core'
+import { useNavigate, useParams } from 'react-router-dom'
+import BoardColumn from '../../components/BoardColumn/BoardColumn'
+import Loader from '../../components/Loader/Loader'
+import Modal from '../../components/Modal/Modal'
+import TaskCard from '../../components/TaskCard/TaskCard'
+import TaskDetailsModal from '../../components/TaskDetailsModal/TaskDetailsModal'
+import Toast from '../../components/Toast/Toast'
+import { useAuth } from '../../providers/AuthProvider'
+import {
+  createColumn,
+  deleteColumn,
+  getColumns,
+  updateColumnsOrder,
+  updateColumnTitle,
+} from '../../services/columns'
+import {
+  addBoardMember,
+  findUserByEmail,
+  getBoardMembers,
+  getUserBoardRole,
+  removeBoardMember,
+} from '../../services/members'
+import { createTask, deleteTask, getTasks } from '../../services/tasks'
+import { supabase } from '../../services/supabase'
+import { getBoardById } from '../../services/boards'
+import './index.scss'
+
+type Column = {
+  id: string
+  board_id: string
+  title: string
+  position: number
+}
+
+type Task = {
+  id: string
+  column_id: string
+  title: string
+  description?: string | null
+  priority?: 'low' | 'medium' | 'high'
+  due_date?: string | null
+  assignee_id?: string | null
+  position: number
+}
+
+type ToastState = {
+  message: string
+  type: 'success' | 'error'
+}
+
+// board page
+export default function BoardPage() {
+  const { id } = useParams()
+  const navigate = useNavigate()
+  const { user } = useAuth()
+
+  const [columns, setColumns] = useState<Column[]>([])
+  const [tasks, setTasks] = useState<Task[]>([])
+  const [members, setMembers] = useState<any[]>([])
+  const [newTaskByColumn, setNewTaskByColumn] = useState<Record<string, string>>({})
+  const [newColumnTitle, setNewColumnTitle] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [actionLoading, setActionLoading] = useState(false)
+  const [activeTask, setActiveTask] = useState<Task | null>(null)
+  const [selectedTask, setSelectedTask] = useState<Task | null>(null)
+  const [taskModalOpen, setTaskModalOpen] = useState(false)
+  const [currentRole, setCurrentRole] = useState<'owner' | 'member' | ''>('')
+  const [_hasAccess, setHasAccess] = useState(true)
+  const [boardTitle, setBoardTitle] = useState('')
+
+  const [toast, setToast] = useState<ToastState>({
+    message: '',
+    type: 'success',
+  })
+
+  const [renameModalOpen, setRenameModalOpen] = useState(false)
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false)
+  const [selectedColumnId, setSelectedColumnId] = useState('')
+  const [renameValue, setRenameValue] = useState('')
+  const [memberEmail, setMemberEmail] = useState('')
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 8,
+      },
+    }),
+    useSensor(TouchSensor, {
+      activationConstraint: {
+        delay: 200,
+        tolerance: 8,
+      },
+    })
+  )
+
+  useEffect(() => {
+    if (!toast.message) return
+
+    const timer = setTimeout(() => {
+      setToast({ message: '', type: 'success' })
+    }, 3000)
+
+    return () => clearTimeout(timer)
+  }, [toast])
+
+  // load columns
+  const loadColumns = async () => {
+    if (!id) return []
+
+    const data = await getColumns(id)
+    setColumns(data)
+    return data
+  }
+
+  // load all tasks for current board columns
+  const loadTasks = async (cols: Column[]) => {
+    let allTasks: Task[] = []
+
+    for (const col of cols) {
+      const colTasks = await getTasks(col.id)
+      allTasks = [...allTasks, ...colTasks]
+    }
+
+    setTasks(allTasks)
+  }
+
+  // load board members
+  const loadMembers = async () => {
+    if (!id) return []
+
+    const data = await getBoardMembers(id)
+    setMembers(data)
+    return data
+  }
+
+  // add member by email
+  const handleAddMember = async () => {
+    try {
+      if (!id) return
+
+      const email = memberEmail.trim().toLowerCase()
+
+      if (!email) return
+
+      setActionLoading(true)
+
+      const profile = await findUserByEmail(email)
+
+      if (!profile) {
+        setToast({
+          message: 'User with this email was not found',
+          type: 'error',
+        })
+        return
+      }
+
+      const alreadyExists = members.some((member) => member.user_id === profile.id)
+
+      if (alreadyExists) {
+        setToast({
+          message: 'User is already a member',
+          type: 'error',
+        })
+        return
+      }
+
+      await addBoardMember(id, profile.id, 'member')
+      setMemberEmail('')
+      await loadMembers()
+
+      setToast({
+        message: 'Member added',
+        type: 'success',
+      })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to add member'
+
+      setToast({
+        message,
+        type: 'error',
+      })
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  // remove member
+  const handleRemoveMember = async (userId: string) => {
+    try {
+      if (!id) return
+      if (userId === user?.id) {
+        setToast({
+          message: 'Owner cannot remove themselves',
+          type: 'error',
+        })
+        return
+      }
+
+      setActionLoading(true)
+
+      await removeBoardMember(id, userId)
+      await loadMembers()
+
+      setToast({
+        message: 'Member removed',
+        type: 'success',
+      })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to remove member'
+
+      setToast({
+        message,
+        type: 'error',
+      })
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  // load current user role
+  const loadCurrentRole = async () => {
+    if (!id || !user?.id) return
+
+    const data = await getUserBoardRole(id, user.id)
+    setCurrentRole(data.role)
+  }
+
+  // check board access
+  const checkBoardAccess = async () => {
+    if (!id || !user?.id) return false
+
+    const roleData = await getUserBoardRole(id, user.id)
+    return !!roleData
+  }
+
+  // load page data
+  const loadBoardData = async () => {
+    try {
+      setLoading(true)
+
+      const access = await checkBoardAccess()
+
+      if (!access) {
+        setHasAccess(false)
+        return
+      }
+
+      setHasAccess(true)
+
+      const board = await getBoardById(id!)
+      setBoardTitle(board.title)
+
+      const cols = await loadColumns()
+      await loadTasks(cols)
+      await loadMembers()
+      await loadCurrentRole()
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to load board data'
+
+      setToast({
+        message,
+        type: 'error',
+      })
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    const init = async () => {
+      if (!id) return
+      await loadBoardData()
+    }
+
+    init()
+  }, [id])
+
+  useEffect(() => {
+    if (!id) return
+
+    const channel = supabase
+      .channel(`board-${id}-realtime`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'tasks',
+        },
+        async () => {
+          const cols = await loadColumns()
+          await loadTasks(cols)
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'columns',
+        },
+        async () => {
+          await loadBoardData()
+        }
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [id])
+
+  // update input value for one column
+  const handleTaskInputChange = (columnId: string, value: string) => {
+    setNewTaskByColumn((prev) => ({
+      ...prev,
+      [columnId]: value,
+    }))
+  }
+
+  // create task in selected column
+  const handleCreateTask = async (columnId: string) => {
+    try {
+      const value = newTaskByColumn[columnId]?.trim()
+
+      if (!value) return
+
+      setActionLoading(true)
+
+      await createTask(columnId, value)
+
+      setNewTaskByColumn((prev) => ({
+        ...prev,
+        [columnId]: '',
+      }))
+
+      await loadTasks(columns)
+
+      setToast({
+        message: 'Task created',
+        type: 'success',
+      })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to create task'
+
+      setToast({
+        message,
+        type: 'error',
+      })
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  // delete task
+  const handleDeleteTask = async (taskId: string) => {
+    try {
+      setActionLoading(true)
+      await deleteTask(taskId)
+      await loadTasks(columns)
+
+      setToast({
+        message: 'Task deleted',
+        type: 'success',
+      })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to delete task'
+
+      setToast({
+        message,
+        type: 'error',
+      })
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  // open task modal
+  const handleOpenTask = (task: Task) => {
+    setSelectedTask(task)
+    setTaskModalOpen(true)
+  }
+
+  // create column
+  const handleCreateColumn = async () => {
+    try {
+      if (!id) return
+
+      const value = newColumnTitle.trim()
+
+      if (!value) return
+
+      setActionLoading(true)
+
+      await createColumn({
+        boardId: id,
+        title: value,
+        position: columns.length,
+      })
+
+      setNewColumnTitle('')
+      await loadBoardData()
+
+      setToast({
+        message: 'Column created',
+        type: 'success',
+      })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to create column'
+
+      setToast({
+        message,
+        type: 'error',
+      })
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  // open rename modal
+  const handleRenameColumn = (columnId: string, currentTitle: string) => {
+    setSelectedColumnId(columnId)
+    setRenameValue(currentTitle)
+    setRenameModalOpen(true)
+  }
+
+  // submit rename
+  const handleRenameSubmit = async () => {
+    try {
+      const value = renameValue.trim()
+
+      if (!value || !selectedColumnId) return
+
+      setActionLoading(true)
+
+      await updateColumnTitle(selectedColumnId, value)
+      await loadBoardData()
+
+      setRenameModalOpen(false)
+      setSelectedColumnId('')
+      setRenameValue('')
+
+      setToast({
+        message: 'Column renamed',
+        type: 'success',
+      })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to rename column'
+
+      setToast({
+        message,
+        type: 'error',
+      })
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  // open delete modal
+  const handleDeleteColumn = (columnId: string) => {
+    setSelectedColumnId(columnId)
+    setDeleteModalOpen(true)
+  }
+
+  // confirm delete
+  const handleDeleteColumnConfirm = async () => {
+    try {
+      if (!selectedColumnId) return
+
+      setActionLoading(true)
+
+      await deleteColumn(selectedColumnId)
+      await loadBoardData()
+
+      setDeleteModalOpen(false)
+      setSelectedColumnId('')
+
+      setToast({
+        message: 'Column deleted',
+        type: 'success',
+      })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to delete column'
+
+      setToast({
+        message,
+        type: 'error',
+      })
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  // move column
+  const moveColumn = async (columnId: string, direction: 'left' | 'right') => {
+    try {
+      const currentIndex = columns.findIndex((column) => column.id === columnId)
+
+      if (currentIndex === -1) return
+
+      const targetIndex = direction === 'left' ? currentIndex - 1 : currentIndex + 1
+
+      if (targetIndex < 0 || targetIndex >= columns.length) return
+
+      const updatedColumns = [...columns]
+      const temp = updatedColumns[currentIndex]
+
+      updatedColumns[currentIndex] = updatedColumns[targetIndex]
+      updatedColumns[targetIndex] = temp
+
+      const columnsWithPosition = updatedColumns.map((column, index) => ({
+        id: column.id,
+        position: index,
+      }))
+
+      setActionLoading(true)
+
+      await updateColumnsOrder(columnsWithPosition)
+      await loadBoardData()
+
+      setToast({
+        message: 'Column order updated',
+        type: 'success',
+      })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to update column order'
+
+      setToast({
+        message,
+        type: 'error',
+      })
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  // move column left
+  const handleMoveColumnLeft = async (columnId: string) => {
+    await moveColumn(columnId, 'left')
+  }
+
+  // move column right
+  const handleMoveColumnRight = async (columnId: string) => {
+    await moveColumn(columnId, 'right')
+  }
+
+  // go back to boards
+  const handleBack = () => {
+    navigate('/')
+  }
+
+  // start dragging task
+  const handleDragStart = (event: DragStartEvent) => {
+    const taskId = String(event.active.id)
+    const currentTask = tasks.find((task) => task.id === taskId) ?? null
+    setActiveTask(currentTask)
+  }
+
+  // cancel dragging
+  const handleDragCancel = () => {
+    setActiveTask(null)
+  }
+
+  // move task to another column
+  const handleDragEnd = async (event: DragEndEvent) => {
+    try {
+      const { active, over } = event
+
+      setActiveTask(null)
+
+      if (!over) return
+      if (active.id === over.id) return
+
+      const taskId = String(active.id)
+      const newColumnId = String(over.id)
+
+      setActionLoading(true)
+
+      await supabase.from('tasks').update({ column_id: newColumnId }).eq('id', taskId)
+
+      await loadTasks(columns)
+
+      setToast({
+        message: 'Task moved',
+        type: 'success',
+      })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to move task'
+
+      setToast({
+        message,
+        type: 'error',
+      })
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  return (
+    <DndContext
+      sensors={sensors}
+      onDragStart={handleDragStart}
+      onDragEnd={handleDragEnd}
+      onDragCancel={handleDragCancel}
+    >
+      <div className='board-page'>
+        <Toast
+          message={toast.message}
+          type={toast.type}
+          onClose={() => setToast({ message: '', type: 'success' })}
+        />
+
+        <div className='board-page__header'>
+          <button type='button' className='board-page__back' onClick={handleBack}>
+            ← Back to boards
+          </button>
+
+          <h1 className='board-page__title'>{boardTitle || 'Board'}</h1>
+        </div>
+
+        {currentRole === 'owner' && (
+          <div className='board-page__add-column'>
+            <input
+              className='board-page__input'
+              type='text'
+              placeholder='New column title'
+              value={newColumnTitle}
+              onChange={(e) => setNewColumnTitle(e.target.value)}
+              disabled={actionLoading}
+            />
+
+            <button
+              type='button'
+              className='board-page__button'
+              onClick={handleCreateColumn}
+              disabled={actionLoading}
+            >
+              {actionLoading ? 'Please wait...' : 'Add column'}
+            </button>
+          </div>
+        )}
+
+        {currentRole === 'owner' && (
+          <div className='board-page__members'>
+            <h3 className='board-page__section-title'>Members</h3>
+
+            <div className='board-page__members-add'>
+              <input
+                className='board-page__input'
+                type='email'
+                placeholder='Member email'
+                value={memberEmail}
+                onChange={(e) => setMemberEmail(e.target.value)}
+                disabled={actionLoading}
+              />
+
+              <button
+                type='button'
+                className='board-page__button'
+                onClick={handleAddMember}
+                disabled={actionLoading}
+              >
+                Add member
+              </button>
+            </div>
+
+            <div className='board-page__members-list'>
+              {members.map((member) => {
+                const profile = member.profiles
+                const displayName = profile?.name || 'Unknown user'
+                const displayEmail = profile?.email || member.user_id
+
+                return (
+                  <div key={member.id} className='board-page__member-card'>
+                    <div className='board-page__member-info'>
+                      <span className='board-page__member-name'>{displayName}</span>
+                      <span className='board-page__member-email'>{displayEmail}</span>
+                      <span className='board-page__member-role'>{member.role}</span>
+                    </div>
+
+                    {member.role !== 'owner' && (
+                      <button
+                        type='button'
+                        className='board-page__button board-page__button--danger'
+                        onClick={() => handleRemoveMember(member.user_id)}
+                        disabled={actionLoading}
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
+
+        {loading ? (
+          <Loader text='Loading board...' />
+        ) : (
+          <div className='board-page__columns'>
+            {columns.map((col) => (
+              <BoardColumn
+                key={col.id}
+                column={col}
+                onDelete={handleDeleteColumn}
+                onRename={handleRenameColumn}
+                onMoveLeft={handleMoveColumnLeft}
+                onMoveRight={handleMoveColumnRight}
+                canManage={currentRole === 'owner'}
+              >
+                {tasks
+                  .filter((task) => task.column_id === col.id)
+                  .map((task) => (
+                    <TaskCard
+                      key={task.id}
+                      task={task}
+                      onDelete={handleDeleteTask}
+                      onOpen={handleOpenTask}
+                    />
+                  ))}
+
+                <div className='board-page__create-task'>
+                  <input
+                    className='board-page__input'
+                    type='text'
+                    placeholder='New task'
+                    value={newTaskByColumn[col.id] ?? ''}
+                    onChange={(e) => handleTaskInputChange(col.id, e.target.value)}
+                    disabled={actionLoading}
+                  />
+
+                  <button
+                    type='button'
+                    className='board-page__button'
+                    onClick={() => handleCreateTask(col.id)}
+                    disabled={actionLoading}
+                  >
+                    Add
+                  </button>
+                </div>
+              </BoardColumn>
+            ))}
+          </div>
+        )}
+
+        <Modal
+          title='Rename column'
+          isOpen={renameModalOpen}
+          onClose={() => {
+            if (actionLoading) return
+            setRenameModalOpen(false)
+            setSelectedColumnId('')
+            setRenameValue('')
+          }}
+        >
+          <div className='board-page__modal-body'>
+            <input
+              className='board-page__input'
+              type='text'
+              placeholder='Column title'
+              value={renameValue}
+              onChange={(e) => setRenameValue(e.target.value)}
+              disabled={actionLoading}
+            />
+
+            <div className='board-page__modal-actions'>
+              <button
+                type='button'
+                className='board-page__button board-page__button--secondary'
+                onClick={() => {
+                  setRenameModalOpen(false)
+                  setSelectedColumnId('')
+                  setRenameValue('')
+                }}
+                disabled={actionLoading}
+              >
+                Cancel
+              </button>
+
+              <button
+                type='button'
+                className='board-page__button'
+                onClick={handleRenameSubmit}
+                disabled={actionLoading}
+              >
+                {actionLoading ? 'Please wait...' : 'Save'}
+              </button>
+            </div>
+          </div>
+        </Modal>
+
+        <Modal
+          title='Delete column'
+          isOpen={deleteModalOpen}
+          onClose={() => {
+            if (actionLoading) return
+            setDeleteModalOpen(false)
+            setSelectedColumnId('')
+          }}
+        >
+          <div className='board-page__modal-body'>
+            <p className='board-page__modal-text'>
+              Are you sure you want to delete this column? All tasks inside this column will also be
+              deleted.
+            </p>
+
+            <div className='board-page__modal-actions'>
+              <button
+                type='button'
+                className='board-page__button board-page__button--secondary'
+                onClick={() => {
+                  setDeleteModalOpen(false)
+                  setSelectedColumnId('')
+                }}
+                disabled={actionLoading}
+              >
+                Cancel
+              </button>
+
+              <button
+                type='button'
+                className='board-page__button board-page__button--danger'
+                onClick={handleDeleteColumnConfirm}
+                disabled={actionLoading}
+              >
+                {actionLoading ? 'Please wait...' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </Modal>
+
+        <TaskDetailsModal
+          isOpen={taskModalOpen}
+          task={selectedTask}
+          members={members}
+          currentUserId={user?.id ?? ''}
+          onClose={() => {
+            setTaskModalOpen(false)
+            setSelectedTask(null)
+          }}
+          onTaskUpdated={loadBoardData}
+        />
+
+        <DragOverlay>{activeTask ? <TaskCard task={activeTask} isOverlay /> : null}</DragOverlay>
+      </div>
+    </DndContext>
+  )
+}
