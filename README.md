@@ -1,73 +1,147 @@
-# React + TypeScript + Vite
+# TaskFlow (Jira-lite)
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+## Описание проекта
 
-Currently, two official plugins are available:
+TaskFlow — веб-приложение разработанное с использованием React, TypeScript и Supabase.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+Приложение поддерживает:
 
-## React Compiler
+- регистрацию и вход пользователей
+- создание и удаление досок
+- работу с колонками и задачами
+- drag-and-drop для задач
+- комментарии
+- совместный доступ к доскам
+- роли owner / member
+- realtime-обновления
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Технологии
 
-## Expanding the ESLint configuration
+- React
+- TypeScript
+- Vite
+- Supabase
+- React Router
+- dnd-kit
+- SCSS
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+## Интерфейс
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+![1](docs/screenshots/login.png)
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+![2](docs/screenshots/boards.png)
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+![3](docs/screenshots/taskboard.png)
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+![4](docs/screenshots/taskdetails.png)
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+![5](docs/screenshots/taskdetailsmobil.png)
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+## Реализованный функционал
+
+### Уровень 1
+
+#### Аутентификация
+
+- регистрация по email и паролю
+- вход и выход
+- защита роутов для неавторизованных пользователей
+
+#### Доски
+
+- список доступных досок
+- создание доски
+- удаление доски
+- переход на страницу доски
+
+#### Колонки
+
+- создание трёх колонок по умолчанию при создании доски
+- добавление колонок
+- удаление колонок
+- переименование колонок
+- изменение порядка колонок
+
+#### Задачи
+
+- создание задачи в колонке
+- удаление задачи
+- перенос задач между колонками через drag-and-drop
+
+#### Базовый UI
+
+- адаптивная вёрстка
+- тёмная тема
+- лоадеры
+- уведомления об ошибках и успешных действиях
+
+### Уровень 2
+
+#### Детали задачи
+
+- открытие задачи в модальном окне
+- редактирование названия
+- описание
+- приоритет
+- дедлайн
+- назначение исполнителя
+
+#### Комментарии
+
+- список комментариев
+- добавление комментариев
+- удаление комментариев
+- отображение автора и времени
+
+#### Realtime
+
+- обновление задач и колонок в реальном времени при открытой доске
+
+#### Совместный доступ
+
+- приглашение пользователя на доску по email
+- роли owner / member
+- owner может управлять участниками
+- owner может управлять структурой доски
+- member может работать с задачами
+
+## Ограничение доступа
+
+Пользователь видит только те доски, в которых он является участником.
+
+Для таблицы `boards` реализована базовая защита через RLS. Для остальных таблиц доступ в текущей версии дополнительно контролируется логикой приложения и ролями пользователей.
+
+## Что можно улучшить
+
+При наличии дополнительного времени можно доработать:
+
+- полную настройку RLS для всех таблиц
+- страницу профиля пользователя
+- аватары пользователей
+- поиск и фильтрацию задач
+- лог активности на доске
+- прикрепление файлов к задачам
+
+## Установка и запуск
+
+Клонировать репозиторий:
+
+git clone https://github.com/dodik1000/taskflow-jira-lite
+cd taskflow-jira-lite
+
+Установить зависимости:
+
+npm install
+
+Создать .env:
+
+cp .env.example .env
+
+И заполнить переменные:
+
+VITE_SUPABASE_URL=
+VITE_SUPABASE_KEY=
+
+Запустить проект:
+
+npm run dev
