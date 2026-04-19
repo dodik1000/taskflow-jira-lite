@@ -1,6 +1,9 @@
 # TaskFlow (Jira-lite)
 
 https://taskflow-jira-lite.vercel.app/
+Tестовые данные для входа:
+artemmakarovv05@gmail.com
+222222
 
 ## Описание проекта
 
