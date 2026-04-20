@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import {
   DndContext,
   DragOverlay,
@@ -15,7 +15,7 @@ import Modal from '../../components/Modal/Modal'
 import TaskCard from '../../components/TaskCard/TaskCard'
 import TaskDetailsModal from '../../components/TaskDetailsModal/TaskDetailsModal'
 import Toast from '../../components/Toast/Toast'
-import { useAuth } from '../../providers/AuthProvider'
+import { useAuth } from '../../providers/auth-context'
 import {
   createColumn,
   deleteColumn,
@@ -23,6 +23,7 @@ import {
   updateColumnsOrder,
   updateColumnTitle,
 } from '../../services/columns'
+import { getBoardById } from '../../services/boards'
 import {
   addBoardMember,
   findUserByEmail,
@@ -32,7 +33,6 @@ import {
 } from '../../services/members'
 import { createTask, deleteTask, getTasks } from '../../services/tasks'
 import { supabase } from '../../services/supabase'
-import { getBoardById } from '../../services/boards'
 import './index.scss'
 
 type Column = {
@@ -58,7 +58,21 @@ type ToastState = {
   type: 'success' | 'error'
 }
 
-// board page
+type MemberProfile = {
+  id: string
+  name: string | null
+  email?: string | null
+  avatar_url: string | null
+}
+
+type Member = {
+  id: string
+  board_id: string
+  user_id: string
+  role: 'owner' | 'member'
+  profiles: MemberProfile | null
+}
+
 export default function BoardPage() {
   const { id } = useParams()
   const navigate = useNavigate()
@@ -66,7 +80,7 @@ export default function BoardPage() {
 
   const [columns, setColumns] = useState<Column[]>([])
   const [tasks, setTasks] = useState<Task[]>([])
-  const [members, setMembers] = useState<any[]>([])
+  const [members, setMembers] = useState<Member[]>([])
   const [newTaskByColumn, setNewTaskByColumn] = useState<Record<string, string>>({})
   const [newColumnTitle, setNewColumnTitle] = useState('')
   const [loading, setLoading] = useState(true)
@@ -75,7 +89,6 @@ export default function BoardPage() {
   const [selectedTask, setSelectedTask] = useState<Task | null>(null)
   const [taskModalOpen, setTaskModalOpen] = useState(false)
   const [currentRole, setCurrentRole] = useState<'owner' | 'member' | ''>('')
-  const [_hasAccess, setHasAccess] = useState(true)
   const [boardTitle, setBoardTitle] = useState('')
 
   const [toast, setToast] = useState<ToastState>({
@@ -113,17 +126,15 @@ export default function BoardPage() {
     return () => clearTimeout(timer)
   }, [toast])
 
-  // load columns
-  const loadColumns = async () => {
+  const loadColumns = useCallback(async () => {
     if (!id) return []
 
     const data = await getColumns(id)
     setColumns(data)
     return data
-  }
+  }, [id])
 
-  // load all tasks for current board columns
-  const loadTasks = async (cols: Column[]) => {
+  const loadTasks = useCallback(async (cols: Column[]) => {
     let allTasks: Task[] = []
 
     for (const col of cols) {
@@ -132,18 +143,123 @@ export default function BoardPage() {
     }
 
     setTasks(allTasks)
-  }
+  }, [])
 
-  // load board members
-  const loadMembers = async () => {
+  const loadMembers = useCallback(async () => {
     if (!id) return []
 
     const data = await getBoardMembers(id)
     setMembers(data)
     return data
+  }, [id])
+
+  const loadCurrentRole = useCallback(async () => {
+    if (!id || !user?.id) return
+
+    const data = await getUserBoardRole(id, user.id)
+
+    if (data) {
+      setCurrentRole(data.role)
+    } else {
+      setCurrentRole('')
+    }
+  }, [id, user])
+
+  const checkBoardAccess = useCallback(async () => {
+    if (!id || !user?.id) return false
+
+    const roleData = await getUserBoardRole(id, user.id)
+    return !!roleData
+  }, [id, user])
+
+  const loadBoardData = useCallback(async () => {
+    try {
+      setLoading(true)
+
+      const access = await checkBoardAccess()
+
+      if (!access) {
+        setCurrentRole('')
+        setColumns([])
+        setTasks([])
+        setMembers([])
+        setBoardTitle('')
+        return
+      }
+
+      if (!id) return
+
+      const board = await getBoardById(id)
+      setBoardTitle(board.title)
+
+      const cols = await loadColumns()
+      await loadTasks(cols)
+      await loadMembers()
+      await loadCurrentRole()
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to load board data'
+
+      setToast({
+        message,
+        type: 'error',
+      })
+    } finally {
+      setLoading(false)
+    }
+  }, [checkBoardAccess, id, loadColumns, loadCurrentRole, loadMembers, loadTasks])
+
+  useEffect(() => {
+    if (!id) return
+
+    const init = async () => {
+      await loadBoardData()
+    }
+
+    void init()
+  }, [id, loadBoardData])
+
+  useEffect(() => {
+    if (!id) return
+
+    const channel = supabase
+      .channel(`board-${id}-realtime`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'tasks',
+        },
+        async () => {
+          const cols = await loadColumns()
+          await loadTasks(cols)
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'columns',
+        },
+        async () => {
+          await loadBoardData()
+        }
+      )
+      .subscribe()
+
+    return () => {
+      void supabase.removeChannel(channel)
+    }
+  }, [id, loadBoardData, loadColumns, loadTasks])
+
+  const handleTaskInputChange = (columnId: string, value: string) => {
+    setNewTaskByColumn((prev) => ({
+      ...prev,
+      [columnId]: value,
+    }))
   }
 
-  // add member by email
   const handleAddMember = async () => {
     try {
       if (!id) return
@@ -194,10 +310,10 @@ export default function BoardPage() {
     }
   }
 
-  // remove member
   const handleRemoveMember = async (userId: string) => {
     try {
       if (!id) return
+
       if (userId === user?.id) {
         setToast({
           message: 'Owner cannot remove themselves',
@@ -227,108 +343,6 @@ export default function BoardPage() {
     }
   }
 
-  // load current user role
-  const loadCurrentRole = async () => {
-    if (!id || !user?.id) return
-
-    const data = await getUserBoardRole(id, user.id)
-    setCurrentRole(data.role)
-  }
-
-  // check board access
-  const checkBoardAccess = async () => {
-    if (!id || !user?.id) return false
-
-    const roleData = await getUserBoardRole(id, user.id)
-    return !!roleData
-  }
-
-  // load page data
-  const loadBoardData = async () => {
-    try {
-      setLoading(true)
-
-      const access = await checkBoardAccess()
-
-      if (!access) {
-        setHasAccess(false)
-        return
-      }
-
-      setHasAccess(true)
-
-      const board = await getBoardById(id!)
-      setBoardTitle(board.title)
-
-      const cols = await loadColumns()
-      await loadTasks(cols)
-      await loadMembers()
-      await loadCurrentRole()
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to load board data'
-
-      setToast({
-        message,
-        type: 'error',
-      })
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  useEffect(() => {
-    const init = async () => {
-      if (!id) return
-      await loadBoardData()
-    }
-
-    init()
-  }, [id])
-
-  useEffect(() => {
-    if (!id) return
-
-    const channel = supabase
-      .channel(`board-${id}-realtime`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'tasks',
-        },
-        async () => {
-          const cols = await loadColumns()
-          await loadTasks(cols)
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'columns',
-        },
-        async () => {
-          await loadBoardData()
-        }
-      )
-      .subscribe()
-
-    return () => {
-      supabase.removeChannel(channel)
-    }
-  }, [id])
-
-  // update input value for one column
-  const handleTaskInputChange = (columnId: string, value: string) => {
-    setNewTaskByColumn((prev) => ({
-      ...prev,
-      [columnId]: value,
-    }))
-  }
-
-  // create task in selected column
   const handleCreateTask = async (columnId: string) => {
     try {
       const value = newTaskByColumn[columnId]?.trim()
@@ -362,7 +376,6 @@ export default function BoardPage() {
     }
   }
 
-  // delete task
   const handleDeleteTask = async (taskId: string) => {
     try {
       setActionLoading(true)
@@ -385,13 +398,11 @@ export default function BoardPage() {
     }
   }
 
-  // open task modal
   const handleOpenTask = (task: Task) => {
     setSelectedTask(task)
     setTaskModalOpen(true)
   }
 
-  // create column
   const handleCreateColumn = async () => {
     try {
       if (!id) return
@@ -427,14 +438,12 @@ export default function BoardPage() {
     }
   }
 
-  // open rename modal
   const handleRenameColumn = (columnId: string, currentTitle: string) => {
     setSelectedColumnId(columnId)
     setRenameValue(currentTitle)
     setRenameModalOpen(true)
   }
 
-  // submit rename
   const handleRenameSubmit = async () => {
     try {
       const value = renameValue.trim()
@@ -466,13 +475,11 @@ export default function BoardPage() {
     }
   }
 
-  // open delete modal
   const handleDeleteColumn = (columnId: string) => {
     setSelectedColumnId(columnId)
     setDeleteModalOpen(true)
   }
 
-  // confirm delete
   const handleDeleteColumnConfirm = async () => {
     try {
       if (!selectedColumnId) return
@@ -501,7 +508,6 @@ export default function BoardPage() {
     }
   }
 
-  // move column
   const moveColumn = async (columnId: string, direction: 'left' | 'right') => {
     try {
       const currentIndex = columns.findIndex((column) => column.id === columnId)
@@ -544,34 +550,28 @@ export default function BoardPage() {
     }
   }
 
-  // move column left
   const handleMoveColumnLeft = async (columnId: string) => {
     await moveColumn(columnId, 'left')
   }
 
-  // move column right
   const handleMoveColumnRight = async (columnId: string) => {
     await moveColumn(columnId, 'right')
   }
 
-  // go back to boards
   const handleBack = () => {
     navigate('/')
   }
 
-  // start dragging task
   const handleDragStart = (event: DragStartEvent) => {
     const taskId = String(event.active.id)
     const currentTask = tasks.find((task) => task.id === taskId) ?? null
     setActiveTask(currentTask)
   }
 
-  // cancel dragging
   const handleDragCancel = () => {
     setActiveTask(null)
   }
 
-  // move task to another column
   const handleDragEnd = async (event: DragEndEvent) => {
     try {
       const { active, over } = event

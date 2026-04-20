@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import Loader from '../../components/Loader/Loader'
 import Toast from '../../components/Toast/Toast'
-import { useAuth } from '../../providers/AuthProvider'
+import { useAuth } from '../../providers/auth-context'
 import { createBoard, deleteBoard, getBoards } from '../../services/boards'
 import { createDefaultColumns } from '../../services/columns'
 import { supabase } from '../../services/supabase'
@@ -45,7 +45,7 @@ export default function BoardsPage() {
   }, [toast])
 
   // load boards
-  const loadBoards = async () => {
+  const loadBoards = useCallback(async () => {
     try {
       if (!user) return
 
@@ -63,12 +63,14 @@ export default function BoardsPage() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [user])
 
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (!user) return
-    loadBoards()
-  }, [user])
+    void loadBoards()
+  }, [user, loadBoards])
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   // create board
   const handleCreate = async () => {

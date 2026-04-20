@@ -4,10 +4,50 @@ import { createComment, deleteComment, getComments } from '../../services/commen
 import { updateTask } from '../../services/tasks'
 import './index.scss'
 
+type MemberProfile = {
+  id: string
+  name: string | null
+  email?: string | null
+  avatar_url: string | null
+}
+
+type Member = {
+  id: string
+  board_id: string
+  user_id: string
+  role: 'owner' | 'member'
+  profiles: MemberProfile | null
+}
+
+type TaskDetailsTask = {
+  id: string
+  title: string
+  description?: string | null
+  priority?: 'low' | 'medium' | 'high'
+  due_date?: string | null
+  assignee_id?: string | null
+}
+
+type CommentProfile = {
+  id: string
+  name: string | null
+  email?: string | null
+  avatar_url: string | null
+}
+
+type CommentItem = {
+  id: string
+  task_id: string
+  user_id: string
+  content: string
+  created_at: string
+  profiles: CommentProfile | null
+}
+
 type TaskDetailsModalProps = {
   isOpen: boolean
-  task: any
-  members: any[]
+  task: TaskDetailsTask | null
+  members: Member[]
   currentUserId: string
   onClose: () => void
   onTaskUpdated: () => Promise<void>
@@ -26,10 +66,11 @@ export default function TaskDetailsModal({
   const [priority, setPriority] = useState<'low' | 'medium' | 'high'>('medium')
   const [dueDate, setDueDate] = useState('')
   const [assigneeId, setAssigneeId] = useState('')
-  const [comments, setComments] = useState<any[]>([])
+  const [comments, setComments] = useState<CommentItem[]>([])
   const [commentText, setCommentText] = useState('')
   const [loading, setLoading] = useState(false)
 
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (!task) return
 
@@ -39,6 +80,7 @@ export default function TaskDetailsModal({
     setDueDate(task.due_date ?? '')
     setAssigneeId(task.assignee_id ?? '')
   }, [task])
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   useEffect(() => {
     if (!task || !isOpen) return

@@ -2,13 +2,21 @@ import type { MouseEvent } from 'react'
 import { useDraggable } from '@dnd-kit/core'
 import './index.scss'
 
+type TaskCardTask = {
+  id: string
+  column_id: string
+  title: string
+  description?: string | null
+  priority?: 'low' | 'medium' | 'high'
+  due_date?: string | null
+  assignee_id?: string | null
+  position: number
+}
+
 type TaskCardProps = {
-  task: {
-    id: string
-    title: string
-  }
+  task: TaskCardTask
   onDelete?: (taskId: string) => void
-  onOpen?: (task: any) => void
+  onOpen?: (task: TaskCardTask) => void
   isOverlay?: boolean
 }
 
