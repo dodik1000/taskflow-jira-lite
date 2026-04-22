@@ -1,24 +1,10 @@
 import { supabase } from './supabase'
 
-// get all boards for current user
-export const getBoards = async (userId: string) => {
-  const { data: memberships, error: membershipError } = await supabase
-    .from('board_members')
-    .select('board_id')
-    .eq('user_id', userId)
-
-  if (membershipError) throw membershipError
-
-  const boardIds = memberships.map((item) => item.board_id)
-
-  if (boardIds.length === 0) {
-    return []
-  }
-
+// get all accessible boards
+export const getBoards = async () => {
   const { data, error } = await supabase
     .from('boards')
     .select('*')
-    .in('id', boardIds)
     .order('created_at', { ascending: false })
 
   if (error) throw error

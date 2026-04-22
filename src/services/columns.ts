@@ -48,11 +48,7 @@ export const createColumn = async ({ boardId, title, position }: CreateColumnDat
     position,
   }
 
-  console.log('createColumn payload:', payload)
-
   const { data, error } = await supabase.from('columns').insert([payload]).select()
-
-  console.log('createColumn result:', { data, error })
 
   if (error) {
     console.error('createColumn error:', error)

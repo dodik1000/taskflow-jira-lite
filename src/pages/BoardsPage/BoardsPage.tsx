@@ -51,7 +51,7 @@ export default function BoardsPage() {
 
       setLoading(true)
 
-      const data = await getBoards(user.id)
+      const data = await getBoards()
       setBoards(data)
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to load boards'
@@ -75,7 +75,6 @@ export default function BoardsPage() {
   // create board
   const handleCreate = async () => {
     try {
-      console.log('create board user:', user)
       const value = title.trim()
 
       if (!value || !user) return
