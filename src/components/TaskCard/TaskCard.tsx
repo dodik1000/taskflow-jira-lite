@@ -1,5 +1,6 @@
-import type { MouseEvent } from 'react'
-import { useDraggable } from '@dnd-kit/core'
+import type { CSSProperties, MouseEvent } from 'react'
+import { CSS } from '@dnd-kit/utilities'
+import { useSortable } from '@dnd-kit/sortable'
 import './index.scss'
 
 type TaskCardTask = {
@@ -21,16 +22,22 @@ type TaskCardProps = {
 }
 
 export default function TaskCard({ task, onDelete, onOpen, isOverlay = false }: TaskCardProps) {
-  const draggable = useDraggable({
+  const sortable = useSortable({
     id: task.id,
+    data: {
+      type: 'task',
+      task,
+      columnId: task.column_id,
+    },
     disabled: isOverlay,
   })
 
-  const { attributes, listeners, setNodeRef, transform, isDragging } = draggable
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = sortable
 
-  const transformStyle = transform
-    ? `translate3d(${transform.x}px, ${transform.y}px, 0)`
-    : undefined
+  const style: CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  }
 
   const handleDeleteClick = (event: MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation()
@@ -49,10 +56,10 @@ export default function TaskCard({ task, onDelete, onOpen, isOverlay = false }: 
     <div
       ref={setNodeRef}
       className={`task-card ${isDragging ? 'task-card--dragging' : ''}`}
-      style={{ transform: transformStyle }}
+      style={style}
       onClick={() => onOpen?.(task)}
-      {...listeners}
       {...attributes}
+      {...listeners}
     >
       <span className='task-card__title'>{task.title}</span>
 

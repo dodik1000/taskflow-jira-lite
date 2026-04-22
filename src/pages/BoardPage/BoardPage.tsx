@@ -1,13 +1,15 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   DndContext,
   DragOverlay,
   PointerSensor,
   TouchSensor,
+  closestCorners,
   useSensor,
   useSensors,
 } from '@dnd-kit/core'
 import type { DragEndEvent, DragStartEvent } from '@dnd-kit/core'
+import { SortableContext, arrayMove, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { useNavigate, useParams } from 'react-router-dom'
 import BoardColumn from '../../components/BoardColumn/BoardColumn'
 import Loader from '../../components/Loader/Loader'
@@ -31,7 +33,7 @@ import {
   getUserBoardRole,
   removeBoardMember,
 } from '../../services/members'
-import { createTask, deleteTask, getTasks } from '../../services/tasks'
+import { createTask, deleteTask, getTasks, reorderTasks } from '../../services/tasks'
 import { supabase } from '../../services/supabase'
 import './index.scss'
 
@@ -252,6 +254,16 @@ export default function BoardPage() {
       void supabase.removeChannel(channel)
     }
   }, [id, loadBoardData, loadColumns, loadTasks])
+
+  const tasksByColumn = useMemo(() => {
+    return columns.reduce<Record<string, Task[]>>((acc, column) => {
+      acc[column.id] = tasks
+        .filter((task) => task.column_id === column.id)
+        .sort((a, b) => a.position - b.position)
+
+      return acc
+    }, {})
+  }, [columns, tasks])
 
   const handleTaskInputChange = (columnId: string, value: string) => {
     setNewTaskByColumn((prev) => ({
@@ -581,26 +593,102 @@ export default function BoardPage() {
       if (!over) return
       if (active.id === over.id) return
 
-      const taskId = String(active.id)
-      const newColumnId = String(over.id)
+      const activeTaskId = String(active.id)
+      const overId = String(over.id)
 
-      setActionLoading(true)
+      const draggedTask = tasks.find((task) => task.id === activeTaskId)
+      if (!draggedTask) return
 
-      await supabase.from('tasks').update({ column_id: newColumnId }).eq('id', taskId)
+      const overTask = tasks.find((task) => task.id === overId)
+      const targetColumnId = overTask ? overTask.column_id : overId
 
-      await loadTasks(columns)
+      const sourceColumnId = draggedTask.column_id
+
+      if (sourceColumnId === targetColumnId) {
+        const sourceTasks = [...(tasksByColumn[sourceColumnId] ?? [])]
+        const oldIndex = sourceTasks.findIndex((task) => task.id === activeTaskId)
+        const newIndex = sourceTasks.findIndex((task) => task.id === overId)
+
+        if (oldIndex === -1 || newIndex === -1) return
+
+        const reordered = arrayMove(sourceTasks, oldIndex, newIndex).map((task, index) => ({
+          ...task,
+          position: index,
+        }))
+
+        const nextTasks = tasks.map((task) => {
+          const updated = reordered.find((item) => item.id === task.id)
+          return updated ?? task
+        })
+
+        setTasks(nextTasks)
+        setActionLoading(true)
+
+        await reorderTasks(
+          reordered.map((task) => ({
+            id: task.id,
+            column_id: task.column_id,
+            position: task.position,
+          }))
+        )
+      } else {
+        const sourceTasks = [...(tasksByColumn[sourceColumnId] ?? [])]
+        const targetTasks = [...(tasksByColumn[targetColumnId] ?? [])]
+
+        const sourceIndex = sourceTasks.findIndex((task) => task.id === activeTaskId)
+        if (sourceIndex === -1) return
+
+        const [movedTask] = sourceTasks.splice(sourceIndex, 1)
+
+        const overIndex = targetTasks.findIndex((task) => task.id === overId)
+        const insertIndex = overTask ? overIndex : targetTasks.length
+
+        targetTasks.splice(insertIndex, 0, {
+          ...movedTask,
+          column_id: targetColumnId,
+        })
+
+        const updatedSource = sourceTasks.map((task, index) => ({
+          ...task,
+          position: index,
+        }))
+
+        const updatedTarget = targetTasks.map((task, index) => ({
+          ...task,
+          position: index,
+        }))
+
+        const untouchedTasks = tasks.filter(
+          (task) => task.column_id !== sourceColumnId && task.column_id !== targetColumnId
+        )
+
+        const nextTasks = [...untouchedTasks, ...updatedSource, ...updatedTarget]
+
+        setTasks(nextTasks)
+        setActionLoading(true)
+
+        await reorderTasks(
+          [...updatedSource, ...updatedTarget].map((task) => ({
+            id: task.id,
+            column_id: task.column_id,
+            position: task.position,
+          }))
+        )
+      }
 
       setToast({
-        message: 'Task moved',
+        message: 'Task order updated',
         type: 'success',
       })
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to move task'
+      const message = error instanceof Error ? error.message : 'Failed to reorder task'
 
       setToast({
         message,
         type: 'error',
       })
+
+      await loadTasks(columns)
     } finally {
       setActionLoading(false)
     }
@@ -609,6 +697,7 @@ export default function BoardPage() {
   return (
     <DndContext
       sensors={sensors}
+      collisionDetection={closestCorners}
       onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
       onDragCancel={handleDragCancel}
@@ -719,9 +808,11 @@ export default function BoardPage() {
                 onMoveRight={handleMoveColumnRight}
                 canManage={currentRole === 'owner'}
               >
-                {tasks
-                  .filter((task) => task.column_id === col.id)
-                  .map((task) => (
+                <SortableContext
+                  items={(tasksByColumn[col.id] ?? []).map((task) => task.id)}
+                  strategy={verticalListSortingStrategy}
+                >
+                  {(tasksByColumn[col.id] ?? []).map((task) => (
                     <TaskCard
                       key={task.id}
                       task={task}
@@ -729,6 +820,7 @@ export default function BoardPage() {
                       onOpen={handleOpenTask}
                     />
                   ))}
+                </SortableContext>
 
                 <div className='board-page__create-task'>
                   <input
