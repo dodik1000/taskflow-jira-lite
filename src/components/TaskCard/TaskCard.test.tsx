@@ -3,12 +3,13 @@ import userEvent from '@testing-library/user-event'
 import { vi } from 'vitest'
 import TaskCard from './TaskCard'
 
-vi.mock('@dnd-kit/core', () => ({
-  useDraggable: () => ({
+vi.mock('@dnd-kit/sortable', () => ({
+  useSortable: () => ({
     attributes: {},
     listeners: {},
     setNodeRef: vi.fn(),
     transform: null,
+    transition: undefined,
     isDragging: false,
   }),
 }))
