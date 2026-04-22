@@ -159,6 +159,10 @@ npm run dev
 
 npm run lint
 
+Проверка типов:
+
+npm run type-check
+
 Запуск тестов:
 
 npm run test:run
