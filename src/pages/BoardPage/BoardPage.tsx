@@ -9,7 +9,9 @@ import {
   useSensors,
 } from '@dnd-kit/core'
 import type { DragEndEvent, DragStartEvent } from '@dnd-kit/core'
-import { SortableContext, arrayMove, verticalListSortingStrategy } from '@dnd-kit/sortable'
+import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable'
+import { reorderTaskList } from '../../utils/reorderTasks'
+import { canManageBoardStructure, canManageMembers } from '../../utils/permissions'
 import { useNavigate, useParams } from 'react-router-dom'
 import BoardColumn from '../../components/BoardColumn/BoardColumn'
 import Loader from '../../components/Loader/Loader'
@@ -33,7 +35,7 @@ import {
   getUserBoardRole,
   removeBoardMember,
 } from '../../services/members'
-import { createTask, deleteTask, getTasks, reorderTasks } from '../../services/tasks'
+import { createTask, deleteTask, getTasksByColumnIds, reorderTasks } from '../../services/tasks'
 import { supabase } from '../../services/supabase'
 import './index.scss'
 
@@ -137,12 +139,8 @@ export default function BoardPage() {
   }, [id])
 
   const loadTasks = useCallback(async (cols: Column[]) => {
-    let allTasks: Task[] = []
-
-    for (const col of cols) {
-      const colTasks = await getTasks(col.id)
-      allTasks = [...allTasks, ...colTasks]
-    }
+    const columnIds = cols.map((col) => col.id)
+    const allTasks = await getTasksByColumnIds(columnIds)
 
     setTasks(allTasks)
   }, [])
@@ -223,37 +221,43 @@ export default function BoardPage() {
   useEffect(() => {
     if (!id) return
 
-    const channel = supabase
-      .channel(`board-${id}-realtime`)
-      .on(
+    const columnIds = columns.map((column) => column.id)
+
+    const channel = supabase.channel(`board-${id}-realtime`).on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'columns',
+        filter: `board_id=eq.${id}`,
+      },
+      async () => {
+        await loadBoardData()
+      }
+    )
+
+    if (columnIds.length > 0) {
+      channel.on(
         'postgres_changes',
         {
           event: '*',
           schema: 'public',
           table: 'tasks',
+          filter: `column_id=in.(${columnIds.join(',')})`,
         },
         async () => {
           const cols = await loadColumns()
           await loadTasks(cols)
         }
       )
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'columns',
-        },
-        async () => {
-          await loadBoardData()
-        }
-      )
-      .subscribe()
+    }
+
+    channel.subscribe()
 
     return () => {
       void supabase.removeChannel(channel)
     }
-  }, [id, loadBoardData, loadColumns, loadTasks])
+  }, [id, columns, loadBoardData, loadTasks, loadColumns])
 
   const tasksByColumn = useMemo(() => {
     return columns.reduce<Record<string, Task[]>>((acc, column) => {
@@ -593,88 +597,14 @@ export default function BoardPage() {
       if (!over) return
       if (active.id === over.id) return
 
-      const activeTaskId = String(active.id)
-      const overId = String(over.id)
+      const result = reorderTaskList(tasks, String(active.id), String(over.id))
 
-      const draggedTask = tasks.find((task) => task.id === activeTaskId)
-      if (!draggedTask) return
+      if (!result) return
 
-      const overTask = tasks.find((task) => task.id === overId)
-      const targetColumnId = overTask ? overTask.column_id : overId
+      setTasks(result.tasks)
+      setActionLoading(true)
 
-      const sourceColumnId = draggedTask.column_id
-
-      if (sourceColumnId === targetColumnId) {
-        const sourceTasks = [...(tasksByColumn[sourceColumnId] ?? [])]
-        const oldIndex = sourceTasks.findIndex((task) => task.id === activeTaskId)
-        const newIndex = sourceTasks.findIndex((task) => task.id === overId)
-
-        if (oldIndex === -1 || newIndex === -1) return
-
-        const reordered = arrayMove(sourceTasks, oldIndex, newIndex).map((task, index) => ({
-          ...task,
-          position: index,
-        }))
-
-        const nextTasks = tasks.map((task) => {
-          const updated = reordered.find((item) => item.id === task.id)
-          return updated ?? task
-        })
-
-        setTasks(nextTasks)
-        setActionLoading(true)
-
-        await reorderTasks(
-          reordered.map((task) => ({
-            id: task.id,
-            column_id: task.column_id,
-            position: task.position,
-          }))
-        )
-      } else {
-        const sourceTasks = [...(tasksByColumn[sourceColumnId] ?? [])]
-        const targetTasks = [...(tasksByColumn[targetColumnId] ?? [])]
-
-        const sourceIndex = sourceTasks.findIndex((task) => task.id === activeTaskId)
-        if (sourceIndex === -1) return
-
-        const [movedTask] = sourceTasks.splice(sourceIndex, 1)
-
-        const overIndex = targetTasks.findIndex((task) => task.id === overId)
-        const insertIndex = overTask ? overIndex : targetTasks.length
-
-        targetTasks.splice(insertIndex, 0, {
-          ...movedTask,
-          column_id: targetColumnId,
-        })
-
-        const updatedSource = sourceTasks.map((task, index) => ({
-          ...task,
-          position: index,
-        }))
-
-        const updatedTarget = targetTasks.map((task, index) => ({
-          ...task,
-          position: index,
-        }))
-
-        const untouchedTasks = tasks.filter(
-          (task) => task.column_id !== sourceColumnId && task.column_id !== targetColumnId
-        )
-
-        const nextTasks = [...untouchedTasks, ...updatedSource, ...updatedTarget]
-
-        setTasks(nextTasks)
-        setActionLoading(true)
-
-        await reorderTasks(
-          [...updatedSource, ...updatedTarget].map((task) => ({
-            id: task.id,
-            column_id: task.column_id,
-            position: task.position,
-          }))
-        )
-      }
+      await reorderTasks(result.updates)
 
       setToast({
         message: 'Task order updated',
@@ -717,7 +647,7 @@ export default function BoardPage() {
           <h1 className='board-page__title'>{boardTitle || 'Board'}</h1>
         </div>
 
-        {currentRole === 'owner' && (
+        {canManageBoardStructure(currentRole) && (
           <div className='board-page__add-column'>
             <input
               className='board-page__input'
@@ -739,7 +669,7 @@ export default function BoardPage() {
           </div>
         )}
 
-        {currentRole === 'owner' && (
+        {canManageMembers(currentRole) && (
           <div className='board-page__members'>
             <h3 className='board-page__section-title'>Members</h3>
 
@@ -806,7 +736,7 @@ export default function BoardPage() {
                 onRename={handleRenameColumn}
                 onMoveLeft={handleMoveColumnLeft}
                 onMoveRight={handleMoveColumnRight}
-                canManage={currentRole === 'owner'}
+                canManage={canManageBoardStructure(currentRole)}
               >
                 <SortableContext
                   items={(tasksByColumn[col.id] ?? []).map((task) => task.id)}

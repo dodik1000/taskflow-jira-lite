@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import Modal from '../Modal/Modal'
+import Toast from '../Toast/Toast'
 import { createComment, deleteComment, getComments } from '../../services/comments'
 import { updateTask } from '../../services/tasks'
 import './index.scss'
@@ -53,6 +54,11 @@ type TaskDetailsModalProps = {
   onTaskUpdated: () => Promise<void>
 }
 
+type ToastState = {
+  message: string
+  type: 'success' | 'error'
+}
+
 export default function TaskDetailsModal({
   isOpen,
   task,
@@ -69,6 +75,20 @@ export default function TaskDetailsModal({
   const [comments, setComments] = useState<CommentItem[]>([])
   const [commentText, setCommentText] = useState('')
   const [loading, setLoading] = useState(false)
+  const [toast, setToast] = useState<ToastState>({
+    message: '',
+    type: 'success',
+  })
+
+  useEffect(() => {
+    if (!toast.message) return
+
+    const timer = setTimeout(() => {
+      setToast({ message: '', type: 'success' })
+    }, 3000)
+
+    return () => clearTimeout(timer)
+  }, [toast])
 
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
@@ -86,183 +106,254 @@ export default function TaskDetailsModal({
     if (!task || !isOpen) return
 
     const loadComments = async () => {
-      const data = await getComments(task.id)
-      setComments(data)
+      try {
+        const data = await getComments(task.id)
+        setComments(data)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to load comments'
+
+        setToast({
+          message,
+          type: 'error',
+        })
+      }
     }
 
-    loadComments()
+    void loadComments()
   }, [task, isOpen])
 
   const handleSave = async () => {
     if (!task) return
 
-    setLoading(true)
+    try {
+      setLoading(true)
 
-    await updateTask(task.id, {
-      title,
-      description,
-      priority,
-      due_date: dueDate || null,
-      assignee_id: assigneeId || null,
-    })
+      await updateTask(task.id, {
+        title,
+        description,
+        priority,
+        due_date: dueDate || null,
+        assignee_id: assigneeId || null,
+      })
 
-    await onTaskUpdated()
-    setLoading(false)
-    onClose()
+      await onTaskUpdated()
+
+      setToast({
+        message: 'Task updated',
+        type: 'success',
+      })
+
+      onClose()
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to update task'
+
+      setToast({
+        message,
+        type: 'error',
+      })
+    } finally {
+      setLoading(false)
+    }
   }
 
   const handleAddComment = async () => {
     if (!task || !commentText.trim()) return
 
-    setLoading(true)
+    try {
+      setLoading(true)
 
-    await createComment(task.id, currentUserId, commentText.trim())
-    const data = await getComments(task.id)
-    setComments(data)
-    setCommentText('')
+      await createComment(task.id, currentUserId, commentText.trim())
 
-    setLoading(false)
+      const data = await getComments(task.id)
+      setComments(data)
+      setCommentText('')
+
+      setToast({
+        message: 'Comment added',
+        type: 'success',
+      })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to add comment'
+
+      setToast({
+        message,
+        type: 'error',
+      })
+    } finally {
+      setLoading(false)
+    }
   }
 
   const handleDeleteComment = async (commentId: string) => {
-    setLoading(true)
-    await deleteComment(commentId)
+    try {
+      setLoading(true)
 
-    if (task) {
-      const data = await getComments(task.id)
-      setComments(data)
+      await deleteComment(commentId)
+
+      if (task) {
+        const data = await getComments(task.id)
+        setComments(data)
+      }
+
+      setToast({
+        message: 'Comment deleted',
+        type: 'success',
+      })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to delete comment'
+
+      setToast({
+        message,
+        type: 'error',
+      })
+    } finally {
+      setLoading(false)
     }
-
-    setLoading(false)
   }
 
   return (
     <Modal title='Task details' isOpen={isOpen} onClose={onClose}>
-      <div className='task-details'>
-        <input
-          className='task-details__input'
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          placeholder='Task title'
+      <>
+        <Toast
+          message={toast.message}
+          type={toast.type}
+          onClose={() => setToast({ message: '', type: 'success' })}
         />
 
-        <textarea
-          className='task-details__textarea'
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          placeholder='Description'
-        />
+        <div className='task-details'>
+          <input
+            className='task-details__input'
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder='Task title'
+            disabled={loading}
+          />
 
-        <select
-          className='task-details__input'
-          value={priority}
-          onChange={(e) => setPriority(e.target.value as 'low' | 'medium' | 'high')}
-        >
-          <option value='low'>Low</option>
-          <option value='medium'>Medium</option>
-          <option value='high'>High</option>
-        </select>
+          <textarea
+            className='task-details__textarea'
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder='Description'
+            disabled={loading}
+          />
 
-        <input
-          className='task-details__input'
-          type='date'
-          value={dueDate}
-          onChange={(e) => setDueDate(e.target.value)}
-        />
-
-        <select
-          className='task-details__input'
-          value={assigneeId}
-          onChange={(e) => setAssigneeId(e.target.value)}
-        >
-          <option value=''>No assignee</option>
-          {members.map((member) => {
-            const profile = member.profiles
-            const displayName = profile?.name || 'Unknown user'
-            const displayEmail = profile?.email || member.user_id
-
-            return (
-              <option key={member.user_id} value={member.user_id}>
-                {displayName} ({displayEmail})
-              </option>
-            )
-          })}
-        </select>
-
-        <div className='task-details__actions'>
-          <button
-            type='button'
-            className='task-details__button task-details__button--secondary'
-            onClick={onClose}
-          >
-            Cancel
-          </button>
-
-          <button
-            type='button'
-            className='task-details__button'
-            onClick={handleSave}
+          <select
+            className='task-details__input'
+            value={priority}
+            onChange={(e) => setPriority(e.target.value as 'low' | 'medium' | 'high')}
             disabled={loading}
           >
-            Save
-          </button>
-        </div>
+            <option value='low'>Low</option>
+            <option value='medium'>Medium</option>
+            <option value='high'>High</option>
+          </select>
 
-        <div className='task-details__comments'>
-          <h4 className='task-details__comments-title'>Comments</h4>
+          <input
+            className='task-details__input'
+            type='date'
+            value={dueDate}
+            onChange={(e) => setDueDate(e.target.value)}
+            disabled={loading}
+          />
 
-          <div className='task-details__comment-create'>
-            <textarea
-              className='task-details__textarea'
-              value={commentText}
-              onChange={(e) => setCommentText(e.target.value)}
-              placeholder='Write a comment'
-            />
+          <select
+            className='task-details__input'
+            value={assigneeId}
+            onChange={(e) => setAssigneeId(e.target.value)}
+            disabled={loading}
+          >
+            <option value=''>No assignee</option>
+            {members.map((member) => {
+              const profile = member.profiles
+              const displayName = profile?.name || 'Unknown user'
+              const displayEmail = profile?.email || member.user_id
+
+              return (
+                <option key={member.user_id} value={member.user_id}>
+                  {displayName} ({displayEmail})
+                </option>
+              )
+            })}
+          </select>
+
+          <div className='task-details__actions'>
+            <button
+              type='button'
+              className='task-details__button task-details__button--secondary'
+              onClick={onClose}
+              disabled={loading}
+            >
+              Cancel
+            </button>
 
             <button
               type='button'
               className='task-details__button'
-              onClick={handleAddComment}
+              onClick={handleSave}
               disabled={loading}
             >
-              Add comment
+              {loading ? 'Please wait...' : 'Save'}
             </button>
           </div>
 
-          <div className='task-details__comment-list'>
-            {comments.map((comment) => {
-              const profile = comment.profiles
-              const displayName = profile?.name || 'Unknown user'
-              const displayEmail = profile?.email || comment.user_id
+          <div className='task-details__comments'>
+            <h4 className='task-details__comments-title'>Comments</h4>
 
-              return (
-                <div key={comment.id} className='task-details__comment'>
-                  <div className='task-details__comment-meta'>
-                    <div className='task-details__comment-author'>
-                      <span className='task-details__comment-name'>{displayName}</span>
-                      <span className='task-details__comment-email'>{displayEmail}</span>
+            <div className='task-details__comment-create'>
+              <textarea
+                className='task-details__textarea'
+                value={commentText}
+                onChange={(e) => setCommentText(e.target.value)}
+                placeholder='Write a comment'
+                disabled={loading}
+              />
+
+              <button
+                type='button'
+                className='task-details__button'
+                onClick={handleAddComment}
+                disabled={loading}
+              >
+                {loading ? 'Please wait...' : 'Add comment'}
+              </button>
+            </div>
+
+            <div className='task-details__comment-list'>
+              {comments.map((comment) => {
+                const profile = comment.profiles
+                const displayName = profile?.name || 'Unknown user'
+                const displayEmail = profile?.email || comment.user_id
+
+                return (
+                  <div key={comment.id} className='task-details__comment'>
+                    <div className='task-details__comment-meta'>
+                      <div className='task-details__comment-author'>
+                        <span className='task-details__comment-name'>{displayName}</span>
+                        <span className='task-details__comment-email'>{displayEmail}</span>
+                      </div>
+
+                      <span>{new Date(comment.created_at).toLocaleString()}</span>
                     </div>
 
-                    <span>{new Date(comment.created_at).toLocaleString()}</span>
+                    <p className='task-details__comment-text'>{comment.content}</p>
+
+                    {comment.user_id === currentUserId && (
+                      <button
+                        type='button'
+                        className='task-details__comment-delete'
+                        onClick={() => handleDeleteComment(comment.id)}
+                        disabled={loading}
+                      >
+                        Delete
+                      </button>
+                    )}
                   </div>
-
-                  <p className='task-details__comment-text'>{comment.content}</p>
-
-                  {comment.user_id === currentUserId && (
-                    <button
-                      type='button'
-                      className='task-details__comment-delete'
-                      onClick={() => handleDeleteComment(comment.id)}
-                    >
-                      Delete
-                    </button>
-                  )}
-                </div>
-              )
-            })}
+                )
+              })}
+            </div>
           </div>
         </div>
-      </div>
+      </>
     </Modal>
   )
 }

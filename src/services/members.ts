@@ -1,5 +1,13 @@
 import { supabase } from './supabase'
 
+// find user profile by email
+type FoundProfile = {
+  id: string
+  name: string | null
+  email: string | null
+  avatar_url: string | null
+}
+
 // get board members with profile data
 export const getBoardMembers = async (boardId: string) => {
   const { data: members, error: membersError } = await supabase
@@ -73,14 +81,14 @@ export const getUserBoardRole = async (boardId: string, userId: string) => {
   return data
 }
 
-// find user profile by email
-export const findUserByEmail = async (email: string) => {
+export const findUserByEmail = async (email: string): Promise<FoundProfile | null> => {
   const { data, error } = await supabase
-    .from('profiles')
-    .select('*')
-    .eq('email', email)
+    .rpc('find_profile_by_email', {
+      profile_email: email,
+    })
     .maybeSingle()
 
   if (error) throw error
-  return data
+
+  return data as FoundProfile | null
 }

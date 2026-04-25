@@ -5,6 +5,7 @@ import { supabase } from './supabase'
 vi.mock('./supabase', () => ({
   supabase: {
     from: vi.fn(),
+    rpc: vi.fn(),
   },
 }))
 
@@ -32,17 +33,19 @@ describe('members service', () => {
 
   it('finds user by email', async () => {
     const chain = {
-      select: vi.fn().mockReturnThis(),
-      eq: vi.fn().mockReturnThis(),
       maybeSingle: vi.fn().mockResolvedValue({
         data: { id: 'user-2', email: 'test@mail.com' },
         error: null,
       }),
     }
 
-    vi.mocked(supabase.from).mockReturnValue(chain as never)
+    vi.mocked(supabase.rpc).mockReturnValue(chain as never)
 
     const result = await findUserByEmail('test@mail.com')
+
+    expect(supabase.rpc).toHaveBeenCalledWith('find_profile_by_email', {
+      profile_email: 'test@mail.com',
+    })
 
     expect(result).toEqual({ id: 'user-2', email: 'test@mail.com' })
   })

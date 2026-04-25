@@ -10,7 +10,7 @@ type TaskUpdates = {
   position?: number
 }
 
-// get tasks by column
+// get tasks by one column
 export const getTasks = async (columnId: string) => {
   const { data, error } = await supabase
     .from('tasks')
@@ -19,7 +19,22 @@ export const getTasks = async (columnId: string) => {
     .order('position')
 
   if (error) throw error
-  return data
+  return data ?? []
+}
+
+// get tasks by many columns
+export const getTasksByColumnIds = async (columnIds: string[]) => {
+  if (columnIds.length === 0) return []
+
+  const { data, error } = await supabase
+    .from('tasks')
+    .select('*')
+    .in('column_id', columnIds)
+    .order('column_id')
+    .order('position')
+
+  if (error) throw error
+  return data ?? []
 }
 
 // create task
@@ -44,17 +59,23 @@ export const createTask = async (columnId: string, title: string) => {
       },
     ])
     .select()
+    .single()
 
   if (error) throw error
-  return data[0]
+  return data
 }
 
 // update task
 export const updateTask = async (taskId: string, updates: TaskUpdates) => {
-  const { data, error } = await supabase.from('tasks').update(updates).eq('id', taskId).select()
+  const { data, error } = await supabase
+    .from('tasks')
+    .update(updates)
+    .eq('id', taskId)
+    .select()
+    .single()
 
   if (error) throw error
-  return data[0]
+  return data
 }
 
 // bulk reorder tasks
@@ -79,9 +100,7 @@ export const reorderTasks = async (
 
   const failed = results.find((result) => result.error)
 
-  if (failed?.error) {
-    throw failed.error
-  }
+  if (failed?.error) throw failed.error
 }
 
 // delete task

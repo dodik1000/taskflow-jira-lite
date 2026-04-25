@@ -14,12 +14,8 @@ export const getColumns = async (boardId: string) => {
     .eq('board_id', boardId)
     .order('position')
 
-  if (error) {
-    console.error('getColumns error:', error)
-    throw error
-  }
-
-  return data
+  if (error) throw error
+  return data ?? []
 }
 
 // create default columns
@@ -30,65 +26,51 @@ export const createDefaultColumns = async (boardId: string) => {
     { board_id: boardId, title: 'Done', position: 2 },
   ]
 
-  console.log('createDefaultColumns payload:', payload)
-
   const { error } = await supabase.from('columns').insert(payload)
 
-  if (error) {
-    console.error('createDefaultColumns error:', error)
-    throw error
-  }
+  if (error) throw error
 }
 
 // create column
 export const createColumn = async ({ boardId, title, position }: CreateColumnData) => {
-  const payload = {
-    board_id: boardId,
-    title,
-    position,
-  }
+  const { data, error } = await supabase
+    .from('columns')
+    .insert([
+      {
+        board_id: boardId,
+        title,
+        position,
+      },
+    ])
+    .select()
+    .single()
 
-  const { data, error } = await supabase.from('columns').insert([payload]).select()
-
-  if (error) {
-    console.error('createColumn error:', error)
-    throw error
-  }
-
-  return data[0]
+  if (error) throw error
+  return data
 }
 
 // update column title
 export const updateColumnTitle = async (columnId: string, title: string) => {
   const { error } = await supabase.from('columns').update({ title }).eq('id', columnId)
 
-  if (error) {
-    console.error('updateColumnTitle error:', error)
-    throw error
-  }
+  if (error) throw error
 }
 
 // delete column
 export const deleteColumn = async (columnId: string) => {
   const { error } = await supabase.from('columns').delete().eq('id', columnId)
 
-  if (error) {
-    console.error('deleteColumn error:', error)
-    throw error
-  }
+  if (error) throw error
 }
 
 // update columns order
 export const updateColumnsOrder = async (columns: Array<{ id: string; position: number }>) => {
-  for (const column of columns) {
-    const { error } = await supabase
-      .from('columns')
-      .update({ position: column.position })
-      .eq('id', column.id)
+  const updates = columns.map((column) =>
+    supabase.from('columns').update({ position: column.position }).eq('id', column.id)
+  )
 
-    if (error) {
-      console.error('updateColumnsOrder error:', error)
-      throw error
-    }
-  }
+  const results = await Promise.all(updates)
+
+  const failed = results.find((res) => res.error)
+  if (failed?.error) throw failed.error
 }
